@@ -8,9 +8,9 @@
 
 # Variables
 
-$UsersExport = 'C:\temp\YammerExport\Users.csv'
+$UsersCSV = 'C:\temp\YammerExport\Users.csv'
 
-$Data = 'C:\temp\YammerExport\Messages.csv'
+$MessagesCSV = 'C:\temp\YammerExport\Messages.csv'
 
 $NetworkDomain = 'modalitysystems.com'
 
@@ -28,4 +28,10 @@ $scriptDir = Split-Path -Parent $myinvocation.mycommand.path
 
 # $output = Yammer-UserActivityFromExport
 
-Yammer-UserActivityFromExport -Debug
+$output = Yammer-UserActivityFromExport -UsersCSV $UsersCSV -MessagesCSV $MessagesCSV -NetworkDomain $NetworkDomain
+
+$output | Select-Object Sender_Name,Days_Since_Last_Post,sender_email | Sort-Object Days_Since_Last_Post -Descending | ft -AutoSize
+
+Write-Verbose "Emails of users who have not posted in lat 14 days"
+
+$output | Where-Object {$_.Days_Since_Last_Post -gt 14} | Select-Object sender_email

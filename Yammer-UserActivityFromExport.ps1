@@ -12,7 +12,6 @@
     https://about.yammer.com/success/activate/admin-guide/managing-your-users/export-users/
 
 
-
 .NOTES  
     Version							: 0.2
  
@@ -20,7 +19,7 @@
     
     Email/Blog/Twitter	: tom@tomarbuthnot.com lyncdup.com @tomarbuthnot
     
-    Dedicated Post			: 
+    Dedicated Post			: https://github.com/tomarbuthnot/Yammer-UserActivityFromExport
     
     Disclaimer   				: THIS CODE IS MADE AVAILABLE AS IS, WITHOUT WARRANTY OF ANY KIND. THE ENTIRE RISK
                           OF THE USE OR THE RESULTS FROM THE USE OF THIS CODE REMAINS WITH THE USER.
@@ -78,16 +77,15 @@
   [cmdletbinding(SupportsShouldProcess=$true)]
   
   Param 	(
-    [Parameter(Mandatory=$false,
+    [Parameter(Mandatory=$true,
     HelpMessage='Users.csv From Yammer Web Export https://about.yammer.com/success/activate/admin-guide/managing-your-users/export-users/')]
     $UsersCSV = 'defaultvalue1',
     
-    
-    [Parameter(Mandatory=$false,
+    [Parameter(Mandatory=$true,
     HelpMessage='Messages.csv from Yammer Data Web Export https://about.yammer.com/success/activate/admin-guide/monitoring-your-data/export-data/')]
     $MessagesCSV = 'defaultvalue1',
     
-    [Parameter(Mandatory=$false,
+    [Parameter(Mandatory=$true,
     HelpMessage='domain.com , used in a find/replace to build clickable URLs to posts rather than API URLs')]
     $NetworkDomain = 'defaultvalue1',
     
@@ -107,55 +105,28 @@
     Write-Verbose "Starting $($myinvocation.mycommand)"
     Write-Verbose "Error log will be $ErrorLog"
     
+    # Parameters input
+    Write-Verbose "Messages CSV to import is $MessagesCSV"
+    Write-Verbose "UserCSV is $UsersCSV"
+    Write-Verbose "Networkdomain is $NetworkDomain"
+
     # Script Level Variable to Stop Execution if there is an issue with any stage of the script
     $script:EverythingOK = $true
-    
-    $Data = Import-Csv "$data"
-    $Data | Sort-Object sender_Name | Select-Object Sender_Name,created_at
-    
-    Write-Debug "Data Variable contains"
-    Write-Debug "$Data"
+    Write-Verbose "UserCSV is $UsersCSV"
 
-    $UniqueUsers = (Import-Csv $UsersExport) | Where-Object {$_.state -eq 'active'} | Select-Object name,email
+    $MessagesImport = Import-Csv "$MessagesCSV"
     
+    $Data = $MessagesImport  | Sort-Object sender_Name | Select-Object Sender_Name,created_at,api_url,sender_email
+
+    $UniqueUsers = (Import-Csv $UsersCSV) | Where-Object {$_.state -eq 'active'} | Select-Object name,email
+    
+    Write-Verbose "Unique Users Count $($UniqueUsers.count)"
+
     $UsersthatPosted = $Data | Select-Object sender_Name -Unique
     
     # Create New Output collection
     $OutputCollection=  @()
-    
-    
-    #############################################################
-    # Function to Deal with Error Output to Log file
-    #############################################################
-    
-    Function ErrorCatch-Action 
-    {
-      Param 	(
-        [Parameter(Mandatory=$false,
-        HelpMessage='Switch to Allow Errors to be Caught without setting EverythingOK to False, stopping other aspects of the script running')]
-        # By default any errors caught will set $EverythingOK to false causing other parts of the script to be skipped
-        [switch]$SetEverythingOKVariabletoTrue
-      ) # Close Parameters
-      
-      # Set EverythingOK to false to avoid running dependant actions
-      If ($SetEverythingOKVariabletoTrue) {$script:EverythingOK = $true}
-      else {$script:EverythingOK = $false}
-      Write-Verbose "EverythingOK set to $script:EverythingOK"
-      
-      # Write Errors to Screen
-      Write-Error $Error[0]
-      # If Error Logging is runnning write to Error Log
-      
-      if ($LogErrors) {
-        # Add Date to Error Log File
-        Get-Date -format 'dd/MM/yyyy HH:mm' | Out-File $ErrorLog -Append
-        $Error | Out-File $ErrorLog -Append
-        '## LINE BREAK BETWEEN ERRORS ##' | Out-File $ErrorLog -Append
-        Write-Warning "Errors Logged to $ErrorLog"
-        # Clear Error Log Variable
-        $Error.Clear()
-      } #Close If
-    } # Close Error-CatchActons Function
+
     
   } #Close Function Begin Block
   
@@ -166,17 +137,20 @@
   Process {
     
     # First Code To Run
-    If ($script:EverythingOK)
+    If ($script:EverythingOK -eq $True)
     {
       Try 	
       {
         
+        # Create an Object with Each Post with datetimeobject with posters details
         Foreach ($Post in $Data)
         {
           # Generate Real Date
           $StringDate = $Post.created_at | Select-String -Pattern '^(((?<1>[0-9]{4}[/.-](?:1[0-2]|0[1-9])[/.-](?:3[01]|[12][0-9]|0[1-9]))))'
           [datetime]$PostDate = $StringDate.Matches[0].Value
           
+          # Write-Verbose "Date of Post was $PostDate, user posting was $($Post.Sender_Name)"
+
           $output = New-Object -TypeName PSobject 
           $output | add-member NoteProperty 'Sender_Name' -value $($Post.Sender_Name)
           $output | add-member NoteProperty 'sender_email' -value $($Post.sender_email)
@@ -188,24 +162,35 @@
         # Create Section output collection
         $OutputCollection2=  @()
         
-        
+
+        # Create an Object with each users last post
         Foreach ($User in $UniqueUsers)
         {
+          Write-Verbose "Working on $($user.Name)"
           # Build Date since Last Post
          
           # Clear output
           $LastPostPerUser = $null
           
-          $LastPostPerUser  = $OutputCollection | Where-Object {$_.Sender_Name -eq "$($user.Name)"} | Sort-Object Date_Posted -Descending | Select-Object -First 1
-          
+          $LastPostPerUser  = $OutputCollection | Where-Object {$_.Sender_Name -eq "$($user.Name)"} | Sort-Object Date_Posted -Descending | Select-Object -First 1 -ErrorAction SilentlyContinue
+
+          Write-Verbose "Last Post for $user is $LastPostPerUser"
+
+           If ($LastPostPerUser -eq $null)
+          {
+            Write-Host "No Post for $($user.email) in CSV Loaded"
+            
+          }
           If ($LastPostPerUser -ne $null)
           {
             $DateSinceLastPost = $(Get-Date) - $($LastPostPerUser.Date_Posted)
             
-            #Build Web URL
+            #Build Web URL         
             $APIURL = $LastPostPerUser.api_url
-            $WebURL = $APIURL.Replace('api/v1',"$NetworkDomain")
-            
+            Write-Verbose "API URL is $APIURL"
+            $WebURL = $APIURL.Replace('api/v1',"$($NetworkDomain)")
+            Write-Verbose "WebURL is $WebURL"
+
             # create new output object
             $output = New-Object -TypeName PSobject 
             
@@ -218,11 +203,7 @@
             # Add output to output collection
             $OutputCollection2 += $output
           }
-          If ($LastPostPerUser -eq $null)
-          {
-            Write-Host "No Post for $($user.Sender_Name) $($user.email) in Range Downloaded"
-            
-          }
+         
           
         }
         
@@ -232,34 +213,14 @@
         
       } # Close Try Block
       
-      Catch 	{ErrorCatch-Action} # Close Catch Block
+      Catch {  Write-Verbose "Error hit"
+              $Error[0]
+            } # Close Catch Block
       
       
     } # Close If Everthing OK Block
     
-    #############################################################
-    # Next Script Action or Try,Catch Block
-    #############################################################
-    
-    # Second Code To Run
-    If ($script:EverythingOK)
-    {
-      Try 	
-      {
-        
-        # Code Goes here
-        
-        
-      } # Close Try Block
-      
-      Catch 	{ErrorCatch-Action} # Close Catch Block
-      
-      
-    } # Close If Everthing OK Block
-    
-    
-  } #Close Function Process Block
-  
+  } # Close Process Block
   #############################################################
   # End Block
   #############################################################
