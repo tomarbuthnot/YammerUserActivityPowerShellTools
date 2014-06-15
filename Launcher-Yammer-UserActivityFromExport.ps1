@@ -23,11 +23,6 @@ $scriptDir = Split-Path -Parent $myinvocation.mycommand.path
 
 # Paramters and Pipe
 
-# Grab output into an object
-# Yammer-UserActivityFromExport | Select-Object Sender_Name,Days_Since_Last_Post,sender_email | Sort-Object Days_Since_Last_Post -Descending | ft -AutoSize
-
-# $output = Yammer-UserActivityFromExport
-
 $output = Yammer-UserActivityFromExport -UsersCSV $UsersCSV -MessagesCSV $MessagesCSV -NetworkDomain $NetworkDomain
 
 $output | Select-Object Sender_Name,Days_Since_Last_Post,sender_email | Sort-Object Days_Since_Last_Post -Descending | ft -AutoSize

@@ -1,3 +1,6 @@
+# Private Files
+*.Private.ps1
+
 # Windows image file caches
 Thumbs.db
 ehthumbs.db
