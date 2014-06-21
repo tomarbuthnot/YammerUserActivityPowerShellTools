@@ -13,7 +13,7 @@
 
 
 .NOTES  
-    Version							: 0.2
+    Version							: 0.3
  
     Author/Copyright		: Copyright Tom Arbuthnot - All Rights Reserved
     
@@ -178,7 +178,19 @@
 
            If ($LastPostPerUser -eq $null)
           {
-            Write-Host "No Post for $($user.email) in CSV Loaded"
+            Write-Verbose "No Post for $($user.email) in CSV Loaded, will be listed as 999 days"
+
+            $output = New-Object -TypeName PSobject 
+            
+            $output | add-member NoteProperty 'Sender_Name' -value $($User.Sender_Name)
+            $output | add-member NoteProperty 'sender_email' -value $($User.email)
+            $output | add-member NoteProperty 'Date_Posted' -value $null
+            $output | add-member NoteProperty 'Days_Since_Last_Post' -value '999'
+            $output | add-member NoteProperty 'Web_URL' -value $null
+            
+            # Add output to output collection
+            $OutputCollection2 += $output
+
             
           }
           If ($LastPostPerUser -ne $null)
