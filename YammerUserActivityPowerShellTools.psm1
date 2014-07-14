@@ -1,7 +1,8 @@
-﻿Function Yammer-UserActivityFromExport {
+﻿Function Get-YammerUserLastActivity {
 <#
 .SYNOPSIS  
-		Takes Yammer CSV Exports for Users and Messages and Parses them to get the last post date and URL for Each User
+		Takes Yammer CSV Exports for Users and Messages and Parses them to get the last activity and URL for Each User
+    Activity includes new threads, likes and contributions
     Allow those less active to be chases for updates/spot training opportunities
 
 .DESCRIPTION  
@@ -13,7 +14,7 @@
 
 
 .NOTES  
-    Version							: 0.3
+    Version							: 0.4
  
     Author/Copyright		: Copyright Tom Arbuthnot - All Rights Reserved
     
@@ -116,18 +117,24 @@
 
     $MessagesImport = Import-Csv "$MessagesCSV"
     
-    $Data = $MessagesImport  | Sort-Object sender_Name | Select-Object Sender_Name,created_at,api_url,sender_email
+    $DataAllPosts = $MessagesImport  | Sort-Object sender_Name | Select-Object Sender_Name,created_at,api_url,sender_email
+
+    # If the row doesn't have a replied to ID, it is a new thread, so looking for any rows without a replied to ID number
+    $DataThreadsOnly = $MessagesImport  | where-object {$_.replied_to_id -notmatch "\d"} | Sort-Object sender_Name | Select-Object Sender_Name,created_at,api_url,sender_email
 
     $UniqueUsers = (Import-Csv $UsersCSV) | Where-Object {$_.state -eq 'active'} | Select-Object name,email
     
     Write-Verbose "Unique Users Count $($UniqueUsers.count)"
 
-    $UsersthatPosted = $Data | Select-Object sender_Name -Unique
-    
-    # Create New Output collection
-    $OutputCollection=  @()
+    $UsersThatHadActivity= $DataAllPosts | Select-Object sender_Name -Unique
+    $UsersThatPostedAThread= $DataThreadsOnly | Select-Object sender_Name -Unique
 
+    # Create New Output collection for all Posts
+    $OutputCollectionAllPosts=  @()
+    $OutputCollectionThreads=  @()
     
+    # Create Section output collection
+    $ScriptOutput=  @()
   } #Close Function Begin Block
   
   #############################################################
@@ -143,7 +150,7 @@
       {
         
         # Create an Object with Each Post with datetimeobject with posters details
-        Foreach ($Post in $Data)
+        Foreach ($Post in $DataAllPosts)
         {
           # Generate Real Date
           $StringDate = $Post.created_at | Select-String -Pattern '^(((?<1>[0-9]{4}[/.-](?:1[0-2]|0[1-9])[/.-](?:3[01]|[12][0-9]|0[1-9]))))'
@@ -156,27 +163,47 @@
           $output | add-member NoteProperty 'sender_email' -value $($Post.sender_email)
           $output | add-member NoteProperty 'Date_Posted' -value $($PostDate)
           $output | add-member NoteProperty 'api_url' -value $($Post.api_url)
-          $OutputCollection += $output     
+          $OutputCollectionAllPosts += $output     
         }
         
-        # Create Section output collection
-        $OutputCollection2=  @()
-        
+        # Create an Object with Each New Thread with datetimeobject with posters details
+           Foreach ($Post in $DataThreadsOnly)
+        {
+          # Generate Real Date
+          $StringDate = $Post.created_at | Select-String -Pattern '^(((?<1>[0-9]{4}[/.-](?:1[0-2]|0[1-9])[/.-](?:3[01]|[12][0-9]|0[1-9]))))'
+          [datetime]$PostDate = $StringDate.Matches[0].Value
+          
+          # Write-Verbose "Date of Post was $PostDate, user posting was $($Post.Sender_Name)"
 
-        # Create an Object with each users last post
+          $output = New-Object -TypeName PSobject 
+          $output | add-member NoteProperty 'Sender_Name' -value $($Post.Sender_Name)
+          $output | add-member NoteProperty 'sender_email' -value $($Post.sender_email)
+          $output | add-member NoteProperty 'Date_Posted' -value $($PostDate)
+          $output | add-member NoteProperty 'api_url' -value $($Post.api_url)
+          $OutputCollectionThreads += $output     
+        }
+
+
+
+        # Create an Object with each users last Activity and Last Thread
         Foreach ($User in $UniqueUsers)
         {
           Write-Verbose "Working on $($user.Name)"
-          # Build Date since Last Post
+          # Build Date since Last Acivity and last Thread
          
           # Clear output
-          $LastPostPerUser = $null
+          $LastActivityPerUser  = $null
           
-          $LastPostPerUser  = $OutputCollection | Where-Object {$_.Sender_Name -eq "$($user.Name)"} | Sort-Object Date_Posted -Descending | Select-Object -First 1 -ErrorAction SilentlyContinue
+          $LastActivityPerUser   = $OutputCollectionAllPosts | Where-Object {$_.Sender_Name -eq "$($user.Name)"} | Sort-Object Date_Posted -Descending | Select-Object -First 1 -ErrorAction SilentlyContinue
 
-          Write-Verbose "Last Post for $user is $LastPostPerUser"
+          $LastThreadPerUser  = $null
 
-           If ($LastPostPerUser -eq $null)
+          $LastThreadPerUser   = $OutputCollectionThreads | Where-Object {$_.Sender_Name -eq "$($user.Name)"} | Sort-Object Date_Posted -Descending | Select-Object -First 1 -ErrorAction SilentlyContinue
+
+          Write-Verbose "Last Activity for $($user.Name) is $LastActivityPerUser"
+          Write-Verbose "Last Thread for $($user.Name) is $LastThreadPerUser"
+
+           If ($LastActivityPerUser -eq $null)
           {
             Write-Verbose "No Post for $($user.email) in CSV Loaded, will be listed as 999 days"
 
@@ -185,48 +212,78 @@
             $output | add-member NoteProperty 'Sender_Name' -value $($User.Sender_Name)
             $output | add-member NoteProperty 'sender_email' -value $($User.email)
             $output | add-member NoteProperty 'Date_Posted' -value $null
-            $output | add-member NoteProperty 'Days_Since_Last_Post' -value '999'
+            $output | add-member NoteProperty 'Days_Since_Last_Activity' -value '999'
             $output | add-member NoteProperty 'Web_URL' -value $null
             
+            # No Activity means no threads too
+            $output | add-member NoteProperty 'Days_Since_Last_Thread' -value '999'
+             
+
             # Add output to output collection
-            $OutputCollection2 += $output
+            $ScriptOutput += $output
 
             
           }
-          If ($LastPostPerUser -ne $null)
+          If ($LastActivityPerUser -ne $null)
           {
-            $DateSinceLastPost = $(Get-Date) - $($LastPostPerUser.Date_Posted)
+            $DateSinceLastPost = $(Get-Date) - $($LastActivityPerUser.Date_Posted)
             
-            #Build Web URL         
-            $APIURL = $LastPostPerUser.api_url
-            Write-Verbose "API URL is $APIURL"
-            $WebURL = $APIURL.Replace('api/v1',"$($NetworkDomain)")
-            Write-Verbose "WebURL is $WebURL"
+            If ($LastThreadPerUser -ne $null)
+            {
+
+            Write-Verbose 'Last Thread Per user is below:'
+            Write-Verbose $LastThreadPerUser
+            $DaysSinceLastThread = ($(Get-Date) - $($LastThreadPerUser.Date_Posted)).days
+            
+            Write-Verbose "Days since last thread is $DaysSinceLastThread"
+            Write-Verbose "API url for thread is $($LastThreadPerUser.api_url)"
+            $LastThreadPerUser | fl *
+
+            #Build Web URL Thread         
+            $ThreadAPIURL = $LastThreadPerUser.api_url
+            Write-Verbose "Thread API URL is $ThreadAPIURL"
+            $WebURLThread = $ThreadAPIURL.Replace('api/v1',"$($NetworkDomain)")
+            Write-Verbose "WebURL Last Thread is $WebURLThread"
+            }
+            If ($LastThreadPerUser -eq $null)
+            {
+            $DaysSinceLastThread = "999"
+            $WebURLThread = $null
+            }
+
+            #Build Web URL Activity         
+            $APIURL = $LastActivityPerUser.api_url
+            Write-Verbose "Activity API URL is $APIURL"
+            $WebURLActivity = $APIURL.Replace('api/v1',"$($NetworkDomain)")
+            Write-Verbose "WebURL Last Activity is $WebURLActivity"
 
             # create new output object
             $output = New-Object -TypeName PSobject 
             
-            $output | add-member NoteProperty 'Sender_Name' -value $($LastPostPerUser.Sender_Name)
-            $output | add-member NoteProperty 'sender_email' -value $($LastPostPerUser.sender_email)
-            $output | add-member NoteProperty 'Date_Posted' -value $($LastPostPerUser.Date_Posted)
-            $output | add-member NoteProperty 'Days_Since_Last_Post' -value $($DateSinceLastPost.Days)
-            $output | add-member NoteProperty 'Web_URL' -value $($WebURL)
+            $output | add-member NoteProperty 'Sender_Name' -value $($LastActivityPerUser.Sender_Name)
+            $output | add-member NoteProperty 'sender_email' -value $($LastActivityPerUser.sender_email)
+            $output | add-member NoteProperty 'Date_Posted' -value $($LastActivityPerUser.Date_Posted)
+            $output | add-member NoteProperty 'Days_Since_Last_Activity' -value $($DateSinceLastPost.Days)
+            $output | add-member NoteProperty 'Days_Since_Last_Thread' -value $DaysSinceLastThread
+
+            $output | add-member NoteProperty 'WebURLActivity' -value $($WebURLActivity)
+            $output | add-member NoteProperty 'WebURLThread' -value $($WebURLThread)
             
             # Add output to output collection
-            $OutputCollection2 += $output
+            $ScriptOutput += $output
           }
          
           
         }
         
         # Write Output collection to pipeline
-        $OutputCollection2
+        $ScriptOutput
         
         
       } # Close Try Block
       
       Catch {  Write-Verbose "Error hit"
-              $Error[0]
+              Write-host "$Error"
             } # Close Catch Block
       
       
@@ -242,10 +299,3 @@
   } #Close Function End Block
   
 } #End Function
-
-
-
-
-
-
- 
